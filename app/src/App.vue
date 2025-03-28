@@ -57,34 +57,58 @@
                 {{ precisePriceFormatter(state.avgPrice[drug.name]) }}
               </td>
               <td class="px-4 py-2 text-center">
-                <input
-                  type="number"
-                  v-model.number="buyAmounts[drug.name]"
-                  min="1"
-                  class="w-24 rounded border px-2 py-1"
-                />
-                <button
-                  @click="buy(drug.name, buyAmounts[drug.name])"
-                  :disabled="state.gameOver || buyAmounts[drug.name] < 1"
-                  class="ml-2 rounded bg-blue-500 px-4 py-2 text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-gray-300"
-                >
-                  Buy
-                </button>
+                <div class="flex items-center">
+                  <div>
+                    <input
+                      type="number"
+                      v-model.number="buyAmounts[drug.name]"
+                      min="1"
+                      :max="Math.floor(state.cash / drug.price)"
+                      class="block w-24 rounded border px-2 py-1"
+                    />
+                    <input
+                      type="range"
+                      v-model.number="buyAmounts[drug.name]"
+                      :min="1"
+                      :max="Math.floor(state.cash / drug.price)"
+                      class="mt-2 w-24"
+                    />
+                  </div>
+                  <button
+                    @click="buy(drug.name, buyAmounts[drug.name])"
+                    :disabled="state.gameOver || buyAmounts[drug.name] < 1"
+                    class="ml-2 rounded bg-blue-500 px-4 py-2 text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-gray-300"
+                  >
+                    Buy
+                  </button>
+                </div>
               </td>
               <td class="px-4 py-2 text-center">
-                <input
-                  type="number"
-                  v-model.number="sellAmounts[drug.name]"
-                  min="1"
-                  class="w-24 rounded border px-2 py-1"
-                />
-                <button
-                  @click="sell(drug.name, sellAmounts[drug.name])"
-                  :disabled="state.gameOver || sellAmounts[drug.name] < 1"
-                  class="ml-2 rounded bg-red-500 px-4 py-2 text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-gray-300"
-                >
-                  Sell
-                </button>
+                <div class="flex items-center">
+                  <div>
+                    <input
+                      type="number"
+                      v-model.number="sellAmounts[drug.name]"
+                      min="1"
+                      :max="state.inventory[drug.name]"
+                      class="block w-24 rounded border px-2 py-1"
+                    />
+                    <input
+                      type="range"
+                      v-model.number="sellAmounts[drug.name]"
+                      :min="1"
+                      :max="state.inventory[drug.name]"
+                      class="mt-2 w-24 bg-red-500"
+                    />
+                  </div>
+                  <button
+                    @click="sell(drug.name, sellAmounts[drug.name])"
+                    :disabled="state.gameOver || sellAmounts[drug.name] < 1"
+                    class="ml-2 rounded bg-red-500 px-4 py-2 text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-gray-300"
+                  >
+                    Sell
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -102,13 +126,6 @@
               ? 'End the game'
               : 'Travel to Next Location'
           }}
-        </button>
-        <button
-          v-else
-          @click="initGame"
-          class="rounded bg-blue-500 px-6 py-2 text-white hover:bg-blue-600"
-        >
-          Restart game
         </button>
       </div>
 
