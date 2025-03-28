@@ -5,6 +5,7 @@ export type Drug = {
   volatility: number
 }
 export type State = {
+  id: string
   day: number
   cash: number
   maxDays: number
@@ -14,30 +15,6 @@ export type State = {
   gameOver: boolean
 }
 
-export type GameEventGeneric<name = string, payload = EventPayload> = {
-  name: name
-  process: (
-    state: State,
-    payload: EventPayload & payload,
-    context: Readonly<Context>
-  ) => Promise<State>
-}
-
-export type GameEvent<name, payload> = GameEventGeneric &
-  GameEventGeneric<name, payload>
-
 export type EventPayload = {
   [key: string]: any
-}
-
-export type Context = {
-  currentState: State
-  previousStates: Array<{
-    event: {
-      event: GameEventGeneric['name']
-      payload: EventPayload
-    }
-    state: State // new state after the event
-    timestamp: Date
-  }>
 }

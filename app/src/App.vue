@@ -1,24 +1,112 @@
 <template>
   <div>
-    <div class="flex gap-4 p-4">
-      <button
-        class="rounded bg-gray-200 p-2"
-        @click="processEventInContext(TravelAction, { days: 1 })"
-      >
-        Travel
-      </button>
-      <button
-        class="rounded bg-gray-200 p-2"
-        @click="processEventInContext(BuyAction, defaultTransaction)"
-      >
-        Buy
-      </button>
-      <button
-        class="rounded bg-gray-200 p-2"
-        @click="processEventInContext(SellAction, defaultTransaction)"
-      >
-        Sell
-      </button>
+    <div class="p-4">
+      <h1>Dope Wars</h1>
+      <div style="display: flex; justify-content: space-between">
+        <div class="status">
+          <p>Day: {{ state.day }} / {{ state.maxDays }}</p>
+          <p>Cash: {{ priceFormatter(state.cash) }}</p>
+          <p>
+            Total Value: {{ priceFormatter(totalValue) }} (
+            {{ priceFormatter(totalProjectedValue) }})
+            <span
+              v-if="historicalAverage"
+              style="font-size: 12px; display: block"
+            >
+              (Avg: {{ priceFormatter(historicalAverage) }}, Diff:
+              {{ percentDifference.toFixed(1) }}%)
+            </span>
+          </p>
+        </div>
+        <div>
+          <StatsPanel :process="process" />
+        </div>
+      </div>
+
+      <table style="width: 100%">
+        <thead>
+          <tr>
+            <th align="left">Drug</th>
+            <th>Price</th>
+            <th>Inventory</th>
+            <th>Avg Price</th>
+            <th>Buy</th>
+            <th>Sell</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="drug in state.drugs" :key="drug.name" style="height: 30px">
+            <td>{{ drug.name }}</td>
+            <td align="center">{{ precisePriceFormatter(drug.price) }}</td>
+            <td align="center">{{ state.inventory[drug.name] }}</td>
+            <td align="center">
+              {{ precisePriceFormatter(state.avgPrice[drug.name]) }}
+            </td>
+            <td align="center">
+              <input
+                type="number"
+                v-model.number="buyAmounts[drug.name]"
+                min="1"
+                style="width: 80px"
+              />
+              <button
+                @click="buy(drug.name, buyAmounts[drug.name])"
+                :disabled="state.gameOver || buyAmounts[drug.name] < 1"
+                class="mx-2 rounded bg-gray-200 p-2 disabled:bg-gray-50 disabled:text-gray-300"
+              >
+                Buy
+              </button>
+            </td>
+            <td align="center">
+              <input
+                type="number"
+                v-model.number="sellAmounts[drug.name]"
+                min="1"
+                style="width: 80px"
+              />
+              <button
+                @click="sell(drug.name, sellAmounts[drug.name])"
+                :disabled="state.gameOver || sellAmounts[drug.name] < 1"
+                class="mx-2 rounded bg-gray-200 p-2 disabled:bg-gray-50 disabled:text-gray-300"
+              >
+                Sell
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="flex justify-end p-4">
+        <button
+          v-if="!state.gameOver"
+          @click="travel"
+          class="rounded bg-gray-200 p-2"
+        >
+          {{
+            state.day >= state.maxDays
+              ? 'End the game'
+              : 'Travel to Next Location'
+          }}
+        </button>
+        <button v-else @click="initGame" class="rounded bg-gray-200 p-2">
+          Restart game
+        </button>
+      </div>
+
+      <div v-if="state.gameOver" class="game-over">
+        <h2>Game Over!</h2>
+        <p>Your final money: {{ priceFormatter(totalValue) }}</p>
+        <button @click="initGame">Restart Game</button>
+      </div>
+
+      <p style="margin-top: 20px">Top 10 scores:</p>
+      <ol v-if="pastResults.length">
+        <li v-for="result in pastResults.slice(0, 10)" :key="result">
+          {{ priceFormatter(result) }}
+        </li>
+      </ol>
+
+      <button @click="initGame">Restart Game</button>
     </div>
     <div class="flex gap-10 p-4">
       <pre>
@@ -27,10 +115,10 @@
 <code>{{ JSON.stringify(sellAmounts, null, 2) }}</code>
       </pre>
       <pre>
-<code>{{ JSON.stringify(context.currentState, null, 2) }}</code>
+<code>{{ JSON.stringify(process.state, null, 2) }}</code>
       </pre>
       <pre>
-<code>{{ JSON.stringify(context.previousStates, null, 2) }}</code>
+<code>{{ JSON.stringify(process.stateHistory, null, 2) }}</code>
       </pre>
     </div>
     <pre></pre>
@@ -39,19 +127,15 @@
 
 <script setup lang="ts">
   import { ref, computed, reactive, watch, onBeforeMount } from 'vue'
-  import { cloneDeep } from 'lodash'
-  import type {
-    EventPayload,
-    State,
-    Context,
-    GameEventGeneric,
-  } from '~/types/game'
+  import type { State } from '~/types/game'
   import {
     BuyAction,
     SellAction,
     TravelAction,
   } from './plugins/dopewars/actions'
-  import { processEvent } from './plugins/base/engine'
+  import { Process } from './plugins/base/engine'
+  import { getTotalProjectedValue, getTotalValue } from './plugins/base/utils'
+  import StatsPanel from './components/StatsPanel.vue'
 
   function createInitialState(): State {
     const drugs = [
@@ -68,6 +152,7 @@
     )
 
     return {
+      id: '0',
       day: 0,
       cash: 1000,
       maxDays: 30,
@@ -78,21 +163,13 @@
     }
   }
 
-  const context = ref<Context>({
-    currentState: createInitialState(),
-    previousStates: [],
-  })
-  const state = computed(() => context.value.currentState)
+  const process = ref(new Process(createInitialState()))
 
-  const totalValue = computed(
-    () =>
-      state.value.cash +
-      state.value.drugs.reduce(
-        (sum, drug) =>
-          sum +
-          state.value.inventory[drug.name] * state.value.avgPrice[drug.name],
-        0
-      )
+  const state = computed(() => process.value.state)
+
+  const totalValue = computed(() => Math.round(getTotalValue(state.value)))
+  const totalProjectedValue = computed(() =>
+    Math.round(getTotalProjectedValue(state.value))
   )
 
   const buyAmounts = reactive<Record<string, number>>(
@@ -110,26 +187,49 @@
     () => {
       for (const drug of state.value.drugs) {
         buyAmounts[drug.name] = Math.floor(state.value.cash / drug.price)
-        sellAmounts[drug.name] = state.value.inventory[drug.name]
+        sellAmounts[drug.name] = process.value.state.inventory[drug.name]
       }
     }
   )
 
-  async function processEventInContext(
-    event: GameEventGeneric,
-    payload: EventPayload
-  ) {
-    return await processEvent(context.value, event, payload)
-  }
-
   onBeforeMount(async () => {
     // init the game
-    context.value = await processEventInContext(TravelAction, { days: 1 })
+    travel()
   })
 
-  // temporary helper for dev
-  const defaultTransaction = {
-    drug: state.value.drugs[0].name,
-    quantity: 1,
+  function travel() {
+    process.value.dispatch(new TravelAction(process.value.state, { days: 1 }))
+  }
+
+  function sell(drug: string, quantity: number) {
+    process.value.dispatch(
+      new SellAction(process.value.state, { drug, quantity })
+    )
+  }
+
+  function buy(drug: string, quantity: number) {
+    process.value.dispatch(
+      new BuyAction(process.value.state, { drug, quantity })
+    )
+  }
+
+  const historicalAverage = null
+  const percentDifference = 0
+  const pastResults = []
+
+  const priceFormatter = new Intl.NumberFormat('sk', {
+    style: 'currency',
+    currency: 'EUR',
+    maximumFractionDigits: 0,
+  }).format
+  const precisePriceFormatter = new Intl.NumberFormat('sk', {
+    style: 'currency',
+    currency: 'EUR',
+    maximumFractionDigits: 2,
+  }).format
+
+  function initGame() {
+    process.value = new Process(createInitialState())
+    travel()
   }
 </script>

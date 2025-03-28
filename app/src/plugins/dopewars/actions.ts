@@ -1,4 +1,6 @@
-import type { GameEvent } from '~/types/game'
+import type { State } from '~/types/game'
+import { GameEvent, Process, type RandomEventPool } from '../base/engine'
+import { DealerScamEvent, LuckyFindEvent, PriceSurgeEvent } from './events'
 
 export type TransactionPayload = {
   drug: string
@@ -11,97 +13,116 @@ export type TransactionPayload = {
  * Checks if the drug exists in the state, if the quantity is valid and if the inventory has enough of the drug.
  * Updates the cash and inventory of the state. If inventory is completely exhausted, resets the average price to zero.
  */
-export const SellAction: GameEvent<'sell', TransactionPayload> = {
-  name: 'sell',
-  process: async (state, { drug, quantity }, context) => {
-    const drugIndex = state.drugs.findIndex((d) => d.name === drug)
+export class SellAction extends GameEvent {
+  readonly name = 'sell'
+  async execute(): Promise<{ state: State; data: any }> {
+    const { drug, quantity } = this.payload
+    const drugIndex = this.state.drugs.findIndex((d) => d.name === drug)
     if (drugIndex === -1) {
       throw new Error('Drug not found')
     }
     if (quantity <= 0) {
       throw new Error('Invalid quantity')
     }
-    if (quantity > state.inventory[drug]) {
+    if (quantity > this.state.inventory[drug]) {
       throw new Error('Not enough inventory')
     }
 
-    const drugPrice = state.drugs[drugIndex].price
-    state.cash += drugPrice * quantity
-    state.inventory[drug] -= quantity
+    const drugPrice = this.state.drugs[drugIndex].price
+    this.state.cash += drugPrice * quantity
+    this.state.inventory[drug] -= quantity
 
     // reset avg price if inventory is completely exhausted
-    if (state.inventory[drug] === 0) {
-      state.avgPrice[drug] = 0
+    if (this.state.inventory[drug] === 0) {
+      this.state.avgPrice[drug] = 0
     }
 
-    return state
-  },
+    return { state: this.state, data: {} }
+  }
 }
+
 /**
  * Processes the buying of drugs.
  *
  * Checks if the drug exists in the state, if the quantity is valid and if the player has enough cash.
  * Updates the cash, inventory of the state, and the average price of the drug.
  */
-export const BuyAction: GameEvent<'buy', TransactionPayload> = {
-  name: 'buy',
-  process: async (state, { drug, quantity }, context) => {
-    const drugIndex = state.drugs.findIndex((d) => d.name === drug)
+export class BuyAction extends GameEvent {
+  name = 'buy'
+  async execute(): Promise<{ state: State; data: any }> {
+    let { drug, quantity } = this.payload
+    const drugIndex = this.state.drugs.findIndex((d) => d.name === drug)
     if (drugIndex === -1) {
       throw new Error('Drug not found')
     }
     if (quantity <= 0) {
       throw new Error('Invalid quantity')
     }
-    const drugPrice = state.drugs[drugIndex].price
+    const drugPrice = this.state.drugs[drugIndex].price
     const totalCost = drugPrice * quantity
-    if (totalCost > state.cash) {
+    if (totalCost > this.state.cash) {
       throw new Error('Not enough cash')
     }
 
-    state.cash -= totalCost
+    // let random events change the quantity
+    if (quantity > 1) {
+      const output = await this.triggerRandomEvent([[DealerScamEvent, 0.02]], {
+        quantity,
+      })
+      if (output) {
+        quantity = output.data.quantity
+      }
+    }
+
+    this.state.cash -= totalCost
     let basePrice =
-      state.inventory[drug] === 0
-        ? state.drugs[drugIndex].price
-        : state.avgPrice[drug]
-    state.inventory[drug] += quantity
+      this.state.inventory[drug] === 0
+        ? this.state.drugs[drugIndex].price
+        : this.state.avgPrice[drug]
+    this.state.inventory[drug] += quantity
 
     // update avg price
-    state.avgPrice[drug] =
-      (basePrice * (state.inventory[drug] - quantity) + totalCost) /
-      state.inventory[drug]
-    return state
-  },
+    this.state.avgPrice[drug] =
+      (basePrice * (this.state.inventory[drug] - quantity) + totalCost) /
+      this.state.inventory[drug]
+    return { state: this.state, data: {} }
+  }
 }
 export type TravelPayload = {
   days: number
 }
+
 /**
  * TravelAction is a GameEvent that processes the travel action.
  *
  * Updates the day, drug prices, and checks if the game is over.
  */
-export type TravelEvent = GameEvent<'Travel', TravelPayload>
-export const TravelAction: TravelEvent = {
-  name: 'Travel',
-  process: async (state, payload, context) => {
-    const days = payload.days || 1
+export class TravelAction extends GameEvent {
+  readonly name = 'travel'
 
-    // check if game over
-    if (state.day + days > state.maxDays) {
-      state.gameOver = true
-      return state
+  async execute(): Promise<{ state: State; data: any }> {
+    const addDays = this.payload.days || 1
+    if (this.state.day + addDays > this.state.maxDays) {
+      this.state.gameOver = true
+      return { state: this.state, data: {} }
     }
-    state.day += days
+    this.state.day += addDays
 
     // update drug prices
-    state.drugs = state.drugs.map((drug) => {
+    this.state.drugs = this.state.drugs.map((drug) => {
       const volatility = drug.volatility
       const variation = Math.random() * volatility * 2 - volatility
       drug.price = drug.basePrice * (1 + variation)
       return drug
     })
 
-    return state
-  },
+    const randomEvents: RandomEventPool = []
+    if (this.state.day > 1) {
+      randomEvents.push([LuckyFindEvent, 0.2])
+      randomEvents.push([PriceSurgeEvent, 0.2])
+      await this.triggerRandomEvent(randomEvents)
+    }
+
+    return { state: this.state, data: {} }
+  }
 }
